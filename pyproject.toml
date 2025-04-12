@@ -1,7 +1,7 @@
 [project]
 name = "arxiv-latex-mcp"
 version = "0.1.0"
-description = "Add your description here"
+description = "An MCP server that fetches and processes arXiv papers using LaTeX source for accurate equation handling"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
