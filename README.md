@@ -6,7 +6,10 @@ An MCP server that enables [Claude Desktop](https://claude.ai/download), [Cursor
 Why use the LaTeX source instead of uploading PDFs? Many PDF chat applications often struggle with mathematical content and equation-heavy papers. By utilizing the original LaTeX source code from arXiv papers, the LLM can accurately understand and handle equations and notations. This approach is particularly valuable for fields like computer science, mathematics, and engineering where precise interpretation of mathematical expressions is crucial.
 
 ## Installation
-Add the following configuration to your config file:
+
+If you are using Claude Desktop, you can utilize Desktop Extensions by double-clicking on the [.dxt file](arxiv-latex-mcp.dxt) to install.
+
+Otherwise, you can manually add the following configuration to your config file:
 ```json
 {
   "mcpServers": {
@@ -16,7 +19,7 @@ Add the following configuration to your config file:
               "--directory",
               "/ABSOLUTE/PATH/TO/arxiv-latex-mcp",
               "run",
-              "arxiv-latex-mcp.py"
+              "server/main.py"
           ]
       }
   }
