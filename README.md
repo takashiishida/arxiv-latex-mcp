@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/takashiishida-arxiv-latex-mcp-badge.png)](https://mseep.ai/app/takashiishida-arxiv-latex-mcp)
+
 # arxiv-latex MCP Server
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![GitHub Release](https://img.shields.io/github/v/release/takashiishida/arxiv-latex-mcp)](https://github.com/takashiishida/arxiv-latex-mcp/releases)
