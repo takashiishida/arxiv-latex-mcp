@@ -1,5 +1,7 @@
 # arxiv-latex MCP Server
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub Release](https://img.shields.io/github/v/release/takashiishida/arxiv-latex-mcp)](https://github.com/takashiishida/arxiv-latex-mcp/releases)
+
 
 An MCP server that enables [Claude Desktop](https://claude.ai/download), [Cursor](https://www.cursor.com/), or other MCP clients to directly access and process arXiv papers by fetching the LaTeX source. It uses [arxiv-to-prompt](https://github.com/takashiishida/arxiv-to-prompt) under the hood to handle downloading and processing the LaTeX.
 
@@ -7,7 +9,8 @@ Why use the LaTeX source instead of uploading PDFs? Many PDF chat applications o
 
 ## Installation
 
-If you are using Claude Desktop, you can utilize Desktop Extensions by double-clicking on the [.dxt file](arxiv-latex-mcp.dxt) to install.
+If you are using Claude Desktop, you can utilize Desktop Extensions by double-clicking on the .dxt file to install.
+Download the .dxt file from [here](https://github.com/takashiishida/arxiv-latex-mcp/releases/).
 
 Otherwise, you can manually add the following configuration to your config file:
 ```json
