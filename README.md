@@ -2,6 +2,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![GitHub Release](https://img.shields.io/github/v/release/takashiishida/arxiv-latex-mcp)](https://github.com/takashiishida/arxiv-latex-mcp/releases)
 
+[![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/takashiishida/arxiv-latex-mcp)](https://archestra.ai/mcp-catalog/takashiishida__arxiv-latex-mcp)
+
 
 An MCP server that enables [Claude Desktop](https://claude.ai/download), [Cursor](https://www.cursor.com/), or other MCP clients to directly access and process arXiv papers by fetching the LaTeX source. It uses [arxiv-to-prompt](https://github.com/takashiishida/arxiv-to-prompt) under the hood to handle downloading and processing the LaTeX.
 
