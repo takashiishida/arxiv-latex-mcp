@@ -27,7 +27,7 @@ wheels = [
 
 [[package]]
 name = "arxiv-latex-mcp"
-version = "0.1.0"
+version = "0.2.0"
 source = { virtual = "." }
 dependencies = [
     { name = "arxiv-to-prompt" },
@@ -37,21 +37,23 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arxiv-to-prompt", specifier = ">=0.1.1" },
+    { name = "arxiv-to-prompt", specifier = ">=0.10.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.6.0" },
 ]
 
 [[package]]
 name = "arxiv-to-prompt"
-version = "0.1.1"
+version = "0.10.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "filelock" },
+    { name = "pyperclip" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/70/55/e1083572aa3d0d278f702e9b4e95cc770fce5a032cf7732f88e490fcfd93/arxiv_to_prompt-0.1.1.tar.gz", hash = "sha256:aea48b441be75aeba580ce336cda28e01493cb729b6673cc01ca49d85faf4115", size = 8329 }
+sdist = { url = "https://files.pythonhosted.org/packages/21/2d/9927ef07075c4d11a130551ebf4d008173966d12705648867742b0767efc/arxiv_to_prompt-0.10.0.tar.gz", hash = "sha256:17a612386dfd8b723784452ff751d7782f5fda9ff79bf0a2faf9eaa6790ae61d", size = 23800 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/35/31/dd4f04450cf24793fc12ef10ae0c3409daa84bcabf54064de153035f5864/arxiv_to_prompt-0.1.1-py3-none-any.whl", hash = "sha256:d3e627dbe9007982690713eea3ac010d1a1130c924c52a46f693cdcb4106eb0f", size = 7471 },
+    { url = "https://files.pythonhosted.org/packages/66/a0/0576a17e1baf903a1998a4f854cc17739db12332d871d123c478d40cc6c9/arxiv_to_prompt-0.10.0-py3-none-any.whl", hash = "sha256:b7cb77901d857edd1c5424c77a0065cfd1bebad9e393f9dc5ec60af17c0101c1", size = 14837 },
 ]
 
 [[package]]
@@ -152,6 +154,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/09/35/2495c4ac46b980e4ca1f6ad6db102322ef3ad2410b79fdde159a4b0f3b92/exceptiongroup-1.2.2.tar.gz", hash = "sha256:47c2edf7c6738fafb49fd34290706d1a1a2f4d1c6df275526b62cbb4aa5393cc", size = 28883 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/02/cc/b7e31358aac6ed1ef2bb790a9746ac2c69bcb3c8588b41616914eb106eaf/exceptiongroup-1.2.2-py3-none-any.whl", hash = "sha256:3111b9d131c238bec2f8f516e123e14ba243563fb135d3fe885990585aa7795b", size = 16453 },
+]
+
+[[package]]
+name = "filelock"
+version = "3.24.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/73/92/a8e2479937ff39185d20dd6a851c1a63e55849e447a55e798cc2e1f49c65/filelock-3.24.3.tar.gz", hash = "sha256:011a5644dc937c22699943ebbfc46e969cdde3e171470a6e40b9533e5a72affa", size = 37935 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9c/0f/5d0c71a1aefeb08efff26272149e07ab922b64f46c63363756224bd6872e/filelock-3.24.3-py3-none-any.whl", hash = "sha256:426e9a4660391f7f8a810d71b0555bce9008b0a1cc342ab1f6947d37639e002d", size = 24331 },
 ]
 
 [[package]]
@@ -377,6 +388,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/7c/2d/c3338d48ea6cc0feb8446d8e6937e1408088a72a39937982cc6111d17f84/pygments-2.19.1.tar.gz", hash = "sha256:61c16d2a8576dc0649d9f39e089b5f02bcd27fba10d8fb4dcc28173f7a45151f", size = 4968581 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8a/0b/9fcc47d19c48b59121088dd6da2488a49d5f72dacf8262e2790a1d2c7d15/pygments-2.19.1-py3-none-any.whl", hash = "sha256:9ea1544ad55cecf4b8242fab6dd35a93bbce657034b0611ee383099054ab6d8c", size = 1225293 },
+]
+
+[[package]]
+name = "pyperclip"
+version = "1.11.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/52/d87eba7cb129b81563019d1679026e7a112ef76855d6159d24754dbd2a51/pyperclip-1.11.0.tar.gz", hash = "sha256:244035963e4428530d9e3a6101a1ef97209c6825edab1567beac148ccc1db1b6", size = 12185 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/df/80/fc9d01d5ed37ba4c42ca2b55b4339ae6e200b456be3a1aaddf4a9fa99b8c/pyperclip-1.11.0-py3-none-any.whl", hash = "sha256:299403e9ff44581cb9ba2ffeed69c7aa96a008622ad0c46cb575ca75b5b84273", size = 11063 },
 ]
 
 [[package]]
