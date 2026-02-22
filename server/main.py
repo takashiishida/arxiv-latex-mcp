@@ -24,6 +24,28 @@ logger = logging.getLogger("arxiv-latex-mcp")
 # Create server instance
 server = Server("arxiv-latex-mcp")
 
+# MCP logging level (can be changed by client via logging/setLevel)
+mcp_log_level: types.LoggingLevel = "info"
+
+
+@server.set_logging_level()
+async def handle_set_logging_level(level: types.LoggingLevel) -> None:
+    """Handle logging level changes from the client."""
+    global mcp_log_level
+    mcp_log_level = level
+    logger.info(f"MCP logging level set to: {level}")
+
+
+async def mcp_log(level: types.LoggingLevel, message: str) -> None:
+    """Send a log message to the MCP client."""
+    MCP_LEVEL_ORDER = ["debug", "info", "notice", "warning", "error", "critical", "alert", "emergency"]
+    if MCP_LEVEL_ORDER.index(level) >= MCP_LEVEL_ORDER.index(mcp_log_level):
+        try:
+            ctx = server.request_context
+            await ctx.session.send_log_message(level=level, data=message, logger="arxiv-latex-mcp")
+        except Exception:
+            pass  # Fall back silently if no active session
+
 
 @server.list_tools()
 async def handle_list_tools() -> list[types.Tool]:
@@ -111,35 +133,35 @@ async def handle_call_tool(
 
     try:
         if name == "get_paper_prompt":
-            logger.info(f"Processing arXiv paper: {arxiv_id}")
+            await mcp_log("info", f"Processing arXiv paper: {arxiv_id}")
             prompt = process_latex_source(arxiv_id)
             result = prompt + LATEX_RENDER_INSTRUCTIONS
-            logger.info(f"Successfully processed arXiv paper: {arxiv_id}")
+            await mcp_log("info", f"Successfully processed arXiv paper: {arxiv_id}")
 
         elif name == "get_paper_abstract":
-            logger.info(f"Getting abstract for arXiv paper: {arxiv_id}")
+            await mcp_log("info", f"Getting abstract for arXiv paper: {arxiv_id}")
             result = process_latex_source(arxiv_id, abstract_only=True)
-            logger.info(f"Successfully got abstract for: {arxiv_id}")
+            await mcp_log("info", f"Successfully got abstract for: {arxiv_id}")
 
         elif name == "list_paper_sections":
-            logger.info(f"Listing sections for arXiv paper: {arxiv_id}")
+            await mcp_log("info", f"Listing sections for arXiv paper: {arxiv_id}")
             text = process_latex_source(arxiv_id)
             sections = list_sections(text)
             result = "\n".join(sections)
-            logger.info(f"Successfully listed sections for: {arxiv_id}")
+            await mcp_log("info", f"Successfully listed sections for: {arxiv_id}")
 
         elif name == "get_paper_section":
             if "section_path" not in arguments:
                 raise ValueError("Missing required argument: section_path")
             section_path = arguments["section_path"]
-            logger.info(f"Getting section '{section_path}' for arXiv paper: {arxiv_id}")
+            await mcp_log("info", f"Getting section '{section_path}' for arXiv paper: {arxiv_id}")
             text = process_latex_source(arxiv_id)
             result = extract_section(text, section_path)
             if result is None:
                 result = f"Section '{section_path}' not found. Use list_paper_sections to see available sections."
             else:
                 result = result + LATEX_RENDER_INSTRUCTIONS
-            logger.info(f"Successfully got section for: {arxiv_id}")
+            await mcp_log("info", f"Successfully got section for: {arxiv_id}")
 
         else:
             raise ValueError(f"Unknown tool: {name}")
@@ -148,7 +170,7 @@ async def handle_call_tool(
 
     except Exception as e:
         error_msg = f"Error processing arXiv paper {arxiv_id}: {str(e)}"
-        logger.error(error_msg)
+        await mcp_log("error", error_msg)
 
         return [types.TextContent(type="text", text=error_msg)]
 
