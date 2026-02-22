@@ -184,7 +184,7 @@ async def main():
             write_stream,
             InitializationOptions(
                 server_name="arxiv-latex-mcp",
-                server_version="0.2.0",
+                server_version="0.2.1",
                 capabilities=server.get_capabilities(
                     notification_options=NotificationOptions(),
                     experimental_capabilities={},

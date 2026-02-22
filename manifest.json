@@ -1,7 +1,7 @@
 {
   "dxt_version": "0.1",
   "name": "arxiv-latex-mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "MCP server that uses arxiv-to-prompt to fetch and process arXiv LaTeX sources for precise interpretation of mathematical expressions in scientific papers.",
   "author": {
     "name": "Takashi Ishida",
