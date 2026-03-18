@@ -1,3 +1,7 @@
 server/lib/
 server/__pycache__/
+__pycache__/
 *.dxt
+build/
+dist/
+*.egg-info/

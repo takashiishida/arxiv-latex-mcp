@@ -1,11 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "arxiv-latex-mcp"
 version = "0.2.1"
 description = "An MCP server that fetches and processes arXiv papers using LaTeX source for accurate equation handling"
 readme = "README.md"
+authors = [{ name = "Takashi Ishida" }]
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = [
     "httpx>=0.28.1",
     "mcp[cli]>=1.6.0",
     "arxiv-to-prompt>=0.10.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/takashiishida/arxiv-latex-mcp"
+Documentation = "https://github.com/takashiishida/arxiv-latex-mcp"
+Issues = "https://github.com/takashiishida/arxiv-latex-mcp/issues"
+Changelog = "https://github.com/takashiishida/arxiv-latex-mcp/releases"
+
+[project.scripts]
+arxiv-latex-mcp = "arxiv_latex_mcp.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["arxiv_latex_mcp*"]
