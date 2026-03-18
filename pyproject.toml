@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "arxiv-latex-mcp"
-version = "0.2.1"
+version = "0.2.2"
 description = "An MCP server that fetches and processes arXiv papers using LaTeX source for accurate equation handling"
 readme = "README.md"
 authors = [{ name = "Takashi Ishida" }]
