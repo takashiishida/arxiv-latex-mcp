@@ -1,0 +1,11 @@
+.venv/
+dist/
+*.dxt
+*.mcpb
+*.egg-info/
+__pycache__/
+.github/
+.claude/
+.git/
+uv.lock
+example.png
