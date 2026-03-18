@@ -14,7 +14,24 @@ If you are using Claude Desktop, you can utilize Desktop Extensions by double-cl
 Download the .dxt file from [here](https://github.com/takashiishida/arxiv-latex-mcp/releases/).
 Supported on macOS and Windows (Windows support is experimental).
 
-Otherwise, you can manually add the following configuration to your config file:
+Otherwise, you can run the server directly from PyPI with `uvx`:
+```json
+{
+  "mcpServers": {
+    "arxiv-latex-mcp": {
+      "command": "uvx",
+      "args": ["arxiv-latex-mcp"]
+    }
+  }
+}
+```
+
+You can also install it with `pip install arxiv-latex-mcp` and run `arxiv-latex-mcp`, or use:
+```bash
+python -m arxiv_latex_mcp
+```
+
+If you prefer to run from a local checkout, add the following configuration to your config file:
 ```json
 {
   "mcpServers": {
@@ -24,7 +41,9 @@ Otherwise, you can manually add the following configuration to your config file:
               "--directory",
               "/ABSOLUTE/PATH/TO/arxiv-latex-mcp",
               "run",
-              "server/main.py"
+              "python",
+              "-m",
+              "arxiv_latex_mcp"
           ]
       }
   }

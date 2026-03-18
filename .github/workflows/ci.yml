@@ -12,4 +12,5 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync
-      - run: uv run python -c "import server.main; print('OK')"
+      - run: uv run python -c "import arxiv_latex_mcp; import arxiv_latex_mcp.server; import server.main; print('OK')"
+      - run: uv build
