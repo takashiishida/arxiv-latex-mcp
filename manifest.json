@@ -18,7 +18,7 @@
         "${__dirname}/server/main.py"
       ],
       "env": {
-        "PYTHONPATH": "${__dirname}/server/lib"
+        "PYTHONPATH": "${__dirname}:${__dirname}/server/lib"
       }
     }
   },
