@@ -43,11 +43,22 @@ async def handle_set_logging_level(level: types.LoggingLevel) -> None:
 
 async def mcp_log(level: types.LoggingLevel, message: str) -> None:
     """Send a log message to the MCP client."""
-    mcp_level_order = ["debug", "info", "notice", "warning", "error", "critical", "alert", "emergency"]
+    mcp_level_order = [
+        "debug",
+        "info",
+        "notice",
+        "warning",
+        "error",
+        "critical",
+        "alert",
+        "emergency",
+    ]
     if mcp_level_order.index(level) >= mcp_level_order.index(mcp_log_level):
         try:
             ctx = server.request_context
-            await ctx.session.send_log_message(level=level, data=message, logger="arxiv-latex-mcp")
+            await ctx.session.send_log_message(
+                level=level, data=message, logger="arxiv-latex-mcp"
+            )
         except Exception:
             pass
 
@@ -58,7 +69,7 @@ async def handle_list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="get_paper_prompt",
-            description="Get a flattened LaTeX code of a paper from arXiv ID for precise interpretation of mathematical expressions",
+            description="Recommended default: fetch the full LaTeX source of an arXiv paper for precise interpretation of mathematical expressions.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -72,7 +83,7 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get_paper_abstract",
-            description="Get just the abstract of an arXiv paper (faster and cheaper than fetching the full paper)",
+            description="Get just the abstract of an arXiv paper. Use this for a quick preview when the user hasn't read the paper yet, not when they provide an arXiv ID to discuss a paper.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -86,7 +97,7 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="list_paper_sections",
-            description="List section headings of an arXiv paper to see its structure",
+            description="List section headings of an arXiv paper. Useful when the full paper is too long for context and you need to identify which sections to fetch individually.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -100,7 +111,7 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get_paper_section",
-            description="Get a specific section of an arXiv paper by section path (use list_paper_sections first to find available sections)",
+            description="Get a specific section of an arXiv paper by section path. Use when the full paper is too long for context or the user wants to focus on a particular section. Use list_paper_sections first to find available paths.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -152,7 +163,9 @@ async def handle_call_tool(
             if "section_path" not in arguments:
                 raise ValueError("Missing required argument: section_path")
             section_path = arguments["section_path"]
-            await mcp_log("info", f"Getting section '{section_path}' for arXiv paper: {arxiv_id}")
+            await mcp_log(
+                "info", f"Getting section '{section_path}' for arXiv paper: {arxiv_id}"
+            )
             text = process_latex_source(arxiv_id)
             result = extract_section(text, section_path)
             if result is None:
