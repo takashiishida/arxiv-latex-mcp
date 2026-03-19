@@ -7,5 +7,7 @@ __pycache__/
 .github/
 .claude/
 .git/
+server/lib/
 uv.lock
 example.png
+log.txt

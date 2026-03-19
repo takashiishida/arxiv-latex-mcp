@@ -1,0 +1,3 @@
+httpx>=0.28.1
+mcp[cli]>=1.6.0
+arxiv-to-prompt>=0.10.0
