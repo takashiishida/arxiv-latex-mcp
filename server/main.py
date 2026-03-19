@@ -11,7 +11,17 @@ _lib_dir = os.path.join(_server_dir, "lib")
 
 # Install dependencies into server/lib on first run so that compiled
 # extensions match the user's Python version and platform.
-if not os.path.isdir(_lib_dir):
+# Skip if deps are already available (e.g. installed via pip/uv).
+def _needs_runtime_install():
+    if os.path.isdir(_lib_dir):
+        return False
+    try:
+        import mcp  # noqa: F401
+        return False
+    except ImportError:
+        return True
+
+if _needs_runtime_install():
     subprocess.check_call(
         [
             sys.executable, "-m", "pip", "install",
