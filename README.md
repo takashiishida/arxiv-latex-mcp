@@ -61,6 +61,10 @@ For Claude Desktop, click on the hammer icon, and you should see the following i
 - `list_paper_sections` — List section headings of a paper
 - `get_paper_section` — Get a specific section by path
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/takashiishida-arxiv-latex-mcp).
+
 ## Example
 Try asking questions about a paper from arXiv, e.g., "Explain the first theorem in 2202.00395"
 
