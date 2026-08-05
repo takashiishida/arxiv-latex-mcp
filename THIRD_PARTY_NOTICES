@@ -1,0 +1,26 @@
+This project includes code derived from arxiv-mcp-server by Joseph Blazick,
+available at https://github.com/blazickjp/arxiv-mcp-server.
+
+The derived portions are the arXiv search functionality in
+arxiv_latex_mcp/server.py (search_papers tool, raw HTTP API approach,
+date filtering, rate limiting, XML parsing).
+
+Copyright 2024 Joseph Blazick
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+Changes made:
+- Adapted to single-file MCP server architecture (no separate modules)
+- Removed Settings/config dependency; uses module-level constants
+- Removed semantic_search and download features (not applicable to this project)
+- Integrated with existing mcp_log infrastructure
