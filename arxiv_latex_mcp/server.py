@@ -32,6 +32,15 @@ server = Server("arxiv-latex-mcp")
 # MCP logging level (can be changed by client via logging/setLevel)
 mcp_log_level: types.LoggingLevel = "info"
 
+# Sent to the client at initialization (MCP "instructions"); clients such as Claude Code show it to
+# the model at session start, so the agent knows how to use the tools before it calls them.
+SERVER_INSTRUCTIONS = """Read arXiv papers from their LaTeX source, so equations, theorems and notation are exact (better than PDF text or web-page summaries).
+- Whole paper: get_paper_prompt (the default; one call returns the full flattened LaTeX).
+- Long paper: list_paper_sections (top-level section titles only), then get_paper_section with section_path set to one of those titles copied verbatim, including any LaTeX. A section includes its subsections; for one subsection use "Section > Subsection" with exact titles. Numbers such as "2.1" do not work.
+- Quick preview only: get_paper_abstract.
+- IDs: "2403.12345" is the latest version, "2403.12345v2" pins a version, and old-style IDs such as "hep-th/9711200" work.
+- An error message says why a paper failed: no LaTeX source (PDF-only paper), no abstract block, a bad ID, or arXiv unreachable. For PDF-only papers read https://arxiv.org/pdf/<id> and say that the equations came from the PDF."""
+
 LATEX_RENDER_INSTRUCTIONS = """
 
 IMPORTANT INSTRUCTIONS FOR RENDERING:
@@ -255,6 +264,7 @@ async def main() -> None:
             InitializationOptions(
                 server_name="arxiv-latex-mcp",
                 server_version=__version__,
+                instructions=SERVER_INSTRUCTIONS,
                 capabilities=server.get_capabilities(
                     notification_options=NotificationOptions(),
                     experimental_capabilities={},
