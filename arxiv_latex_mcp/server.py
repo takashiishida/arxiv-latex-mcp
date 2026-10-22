@@ -6,12 +6,17 @@ for better mathematical expression interpretation.
 """
 
 import logging
+import os
+import re
+import time
+from pathlib import Path
 from typing import Any
 
 import httpx
 from arxiv_to_prompt import (
     extract_arxiv_id,
     extract_section,
+    get_default_cache_dir,
     list_sections,
     process_latex_source,
 )
@@ -32,6 +37,18 @@ server = Server("arxiv-latex-mcp")
 # MCP logging level (can be changed by client via logging/setLevel)
 mcp_log_level: types.LoggingLevel = "info"
 
+# Source cache. arxiv-to-prompt keeps one cache directory per paper (with a per-paper lock and atomic
+# updates). Reuse it, re-download unversioned IDs after a TTL so revised papers are picked up, and
+# fall back to the cached copy when a refresh fails.
+_CACHE_ENABLED = os.environ.get("ARXIV_LATEX_MCP_CACHE", "1") != "0"
+_CACHE_DIR = os.environ.get("ARXIV_LATEX_MCP_CACHE_DIR") or None
+try:
+    _CACHE_TTL_SECONDS = float(os.environ.get("ARXIV_LATEX_MCP_CACHE_TTL_DAYS", "7")) * 86400
+except ValueError:
+    _CACHE_TTL_SECONDS = 7 * 86400
+_VERSIONED_ID = re.compile(r"v\d+$")
+_CACHE_MARKER = ".arxiv_cache_complete"  # written by arxiv-to-prompt when a download is complete
+
 # Sent to the client at initialization (MCP "instructions"); clients such as Claude Code show it to
 # the model at session start, so the agent knows how to use the tools before it calls them.
 SERVER_INSTRUCTIONS = """Read arXiv papers from their LaTeX source, so equations, theorems and notation are exact (better than PDF text or web-page summaries).
@@ -40,6 +57,11 @@ SERVER_INSTRUCTIONS = """Read arXiv papers from their LaTeX source, so equations
 - Quick preview only: get_paper_abstract.
 - IDs: "2403.12345" is the latest version, "2403.12345v2" pins a version, and old-style IDs such as "hep-th/9711200" work.
 - An error message says why a paper failed: no LaTeX source (PDF-only paper), no abstract block, a bad ID, or arXiv unreachable. For PDF-only papers read https://arxiv.org/pdf/<id> and say that the equations came from the PDF."""
+if _CACHE_ENABLED:
+    SERVER_INSTRUCTIONS += (
+        f"\n- Sources are cached locally (unversioned IDs refresh after {_CACHE_TTL_SECONDS / 86400:g} days), "
+        "so repeated calls on the same paper are instant."
+    )
 
 LATEX_RENDER_INSTRUCTIONS = """
 
@@ -50,6 +72,37 @@ When discussing this paper, please use dollar sign notation ($...$) for inline e
 
 class SourceUnavailable(Exception):
     """No usable LaTeX could be produced; the message says why and what to do instead."""
+
+
+def _cache_entry(arxiv_id: str) -> Path:
+    """The paper's directory in the arxiv-to-prompt cache (named as the library names it)."""
+    base = Path(_CACHE_DIR) if _CACHE_DIR else get_default_cache_dir()
+    return base / extract_arxiv_id(arxiv_id).replace("/", "_")
+
+
+def _cache_is_fresh(arxiv_id: str) -> bool:
+    """True if a cached source may be reused: versioned IDs always, others within the TTL."""
+    if _VERSIONED_ID.search(extract_arxiv_id(arxiv_id)):
+        return True  # a specific arXiv version never changes
+    entry = _cache_entry(arxiv_id)
+    marker = entry / _CACHE_MARKER
+    try:
+        stamp = (marker if marker.exists() else entry).stat().st_mtime
+    except OSError:
+        return True  # not cached yet: the library downloads it once
+    return (time.time() - stamp) < _CACHE_TTL_SECONDS
+
+
+def _process(arxiv_id: str, **kwargs: Any) -> str | None:
+    """process_latex_source() with the cache policy above."""
+    if not _CACHE_ENABLED:
+        return process_latex_source(arxiv_id, cache_dir=_CACHE_DIR, **kwargs)
+    fresh = _cache_is_fresh(arxiv_id)
+    result = process_latex_source(arxiv_id, cache_dir=_CACHE_DIR, use_cache=fresh, **kwargs)
+    if result is None and not fresh:
+        # The refresh failed (offline, arXiv down): use the older cached copy instead.
+        result = process_latex_source(arxiv_id, cache_dir=_CACHE_DIR, use_cache=True, **kwargs)
+    return result
 
 
 def _source_problem(arxiv_id: str) -> str | None:
@@ -78,23 +131,26 @@ def _source_problem(arxiv_id: str) -> str | None:
 
 
 def fetch_source(arxiv_id: str, **kwargs: Any) -> str:
-    """Like process_latex_source(), but raises SourceUnavailable with the reason instead of returning None."""
-    result = process_latex_source(arxiv_id, **kwargs)
+    """Like process_latex_source(), but cached, and raises SourceUnavailable with the reason instead of returning None."""
+    result = _process(arxiv_id, **kwargs)
     if result is not None:
         return result
-    problem = _source_problem(arxiv_id)
-    if problem:
-        raise SourceUnavailable(problem)
+    # A complete download in the cache means arXiv has the source, so skip the format-page check.
+    downloaded = _CACHE_ENABLED and (_cache_entry(arxiv_id) / _CACHE_MARKER).is_file()
+    if not downloaded:
+        problem = _source_problem(arxiv_id)
+        if problem:
+            raise SourceUnavailable(problem)
     paper = extract_arxiv_id(arxiv_id)
-    if kwargs.get("abstract_only") and process_latex_source(arxiv_id) is not None:
+    pdf = f"https://arxiv.org/pdf/{paper}"
+    if kwargs.get("abstract_only") and _process(arxiv_id) is not None:
         raise SourceUnavailable(
             "the paper's LaTeX source has no abstract block. Use get_paper_prompt, get_paper_section with a "
             f"title from list_paper_sections, or the abstract page https://arxiv.org/abs/{paper}"
         )
-    raise SourceUnavailable(
-        "the LaTeX source could not be downloaded or processed. "
-        f"Try again later, or read the PDF: https://arxiv.org/pdf/{paper}"
-    )
+    if downloaded:
+        raise SourceUnavailable(f"its LaTeX source has no usable main .tex file. Read the PDF instead: {pdf}")
+    raise SourceUnavailable(f"the LaTeX source could not be downloaded or processed. Try again later, or read the PDF: {pdf}")
 
 
 @server.set_logging_level()

@@ -61,6 +61,16 @@ For Claude Desktop, click on the hammer icon, and you should see the following i
 - `list_paper_sections` — List section headings of a paper
 - `get_paper_section` — Get a specific section by its title from `list_paper_sections` (`Section > Subsection` for a subsection)
 
+## Caching
+
+Paper sources are kept in arxiv-to-prompt's cache (the same one its CLI uses), so repeated calls on the same paper do not download it again. Unversioned IDs such as `2403.12345` are re-downloaded once their copy is older than 7 days, so revised papers are picked up. Versioned IDs such as `2403.12345v2` never change. If a refresh fails, the cached copy is used. To change this, set environment variables in the server's MCP config (`"env": {...}`):
+
+| Variable | Default | Effect |
+|---|---|---|
+| `ARXIV_LATEX_MCP_CACHE` | `1` | `0` turns caching off |
+| `ARXIV_LATEX_MCP_CACHE_TTL_DAYS` | `7` | Age after which unversioned IDs are re-downloaded |
+| `ARXIV_LATEX_MCP_CACHE_DIR` | arxiv-to-prompt's default | Cache location (default `~/.cache/arxiv-to-prompt`, or `%LOCALAPPDATA%\arxiv-to-prompt` on Windows) |
+
 ## Example
 Try asking questions about a paper from arXiv, e.g., "Explain the first theorem in 2202.00395"
 
