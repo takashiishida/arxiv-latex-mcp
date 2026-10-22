@@ -97,7 +97,7 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="list_paper_sections",
-            description="List section headings of an arXiv paper. Useful when the full paper is too long for context and you need to identify which sections to fetch individually.",
+            description="List section headings of an arXiv paper. Useful when the full paper is too long for context and you need to identify which sections to fetch individually. Returns the top-level section titles; pass one verbatim to get_paper_section.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -111,7 +111,7 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get_paper_section",
-            description="Get a specific section of an arXiv paper by section path. Use when the full paper is too long for context or the user wants to focus on a particular section. Use list_paper_sections first to find available paths.",
+            description="Get a specific section of an arXiv paper by its title. Use when the full paper is too long for context or the user wants to focus on a particular section. Use list_paper_sections first to get the titles.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -121,7 +121,7 @@ async def handle_list_tools() -> list[types.Tool]:
                     },
                     "section_path": {
                         "type": "string",
-                        "description": "The section path to extract (e.g., '1', '2.1', 'Introduction'). Use list_paper_sections to find available paths.",
+                        "description": "A section title copied verbatim from list_paper_sections (e.g., 'Introduction'), including any LaTeX in it. For a subsection use 'Section > Subsection' with exact titles. Numbers such as '2.1' are not supported.",
                     },
                 },
                 "required": ["arxiv_id", "section_path"],
@@ -156,7 +156,9 @@ async def handle_call_tool(
             await mcp_log("info", f"Listing sections for arXiv paper: {arxiv_id}")
             text = process_latex_source(arxiv_id)
             sections = list_sections(text)
-            result = "\n".join(sections)
+            result = "\n".join(sections) if sections else (
+                "No \\section headings found in this paper. Read it whole with get_paper_prompt."
+            )
             await mcp_log("info", f"Successfully listed sections for: {arxiv_id}")
 
         elif name == "get_paper_section":
@@ -169,7 +171,11 @@ async def handle_call_tool(
             text = process_latex_source(arxiv_id)
             result = extract_section(text, section_path)
             if result is None:
-                result = f"Section '{section_path}' not found. Use list_paper_sections to see available sections."
+                available = "; ".join(list_sections(text)) or "(none)"
+                result = (
+                    f"Section '{section_path}' not found. Use an exact section title, not a number. "
+                    f"Top-level sections: {available}. For a subsection use 'Section > Subsection'."
+                )
             else:
                 result = result + LATEX_RENDER_INSTRUCTIONS
             await mcp_log("info", f"Successfully got section for: {arxiv_id}")

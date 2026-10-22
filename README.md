@@ -59,7 +59,7 @@ For Claude Desktop, click on the hammer icon, and you should see the following i
 - `get_paper_prompt` — Get the full flattened LaTeX of a paper
 - `get_paper_abstract` — Get just the abstract
 - `list_paper_sections` — List section headings of a paper
-- `get_paper_section` — Get a specific section by path
+- `get_paper_section` — Get a specific section by its title from `list_paper_sections` (`Section > Subsection` for a subsection)
 
 ## Example
 Try asking questions about a paper from arXiv, e.g., "Explain the first theorem in 2202.00395"
