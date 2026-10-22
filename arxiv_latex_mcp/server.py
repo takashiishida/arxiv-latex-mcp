@@ -8,7 +8,13 @@ for better mathematical expression interpretation.
 import logging
 from typing import Any
 
-from arxiv_to_prompt import extract_section, list_sections, process_latex_source
+import httpx
+from arxiv_to_prompt import (
+    extract_arxiv_id,
+    extract_section,
+    list_sections,
+    process_latex_source,
+)
 from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
@@ -31,6 +37,55 @@ LATEX_RENDER_INSTRUCTIONS = """
 IMPORTANT INSTRUCTIONS FOR RENDERING:
 When discussing this paper, please use dollar sign notation ($...$) for inline equations and double dollar signs ($$...$$) for display equations when providing responses that include LaTeX mathematical expressions.
 """
+
+
+class SourceUnavailable(Exception):
+    """No usable LaTeX could be produced; the message says why and what to do instead."""
+
+
+def _source_problem(arxiv_id: str) -> str | None:
+    """Why arXiv cannot provide a LaTeX source, or None if its format page lists one.
+
+    This is the page arxiv-to-prompt checks before downloading.
+    """
+    paper = extract_arxiv_id(arxiv_id)
+    pdf = f"https://arxiv.org/pdf/{paper}"
+    try:
+        page = httpx.get(
+            f"https://arxiv.org/format/{paper}",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=httpx.Timeout(20.0, connect=5.0),
+            follow_redirects=True,
+        )
+    except httpx.HTTPError:
+        return f"arXiv could not be reached. Try again later, or read the PDF: {pdf}"
+    if page.status_code in (400, 404):
+        return f"'{paper}' is not a valid arXiv ID. Check the ID."
+    if not page.is_success:
+        return f"arXiv answered HTTP {page.status_code}. Try again later, or read the PDF: {pdf}"
+    if "Download source" not in page.text:
+        return f"arXiv has no LaTeX source for this paper (it was submitted as a PDF only). Read the PDF instead: {pdf}"
+    return None
+
+
+def fetch_source(arxiv_id: str, **kwargs: Any) -> str:
+    """Like process_latex_source(), but raises SourceUnavailable with the reason instead of returning None."""
+    result = process_latex_source(arxiv_id, **kwargs)
+    if result is not None:
+        return result
+    problem = _source_problem(arxiv_id)
+    if problem:
+        raise SourceUnavailable(problem)
+    paper = extract_arxiv_id(arxiv_id)
+    if kwargs.get("abstract_only") and process_latex_source(arxiv_id) is not None:
+        raise SourceUnavailable(
+            "the paper's LaTeX source has no abstract block. Use get_paper_prompt, get_paper_section with a "
+            f"title from list_paper_sections, or the abstract page https://arxiv.org/abs/{paper}"
+        )
+    raise SourceUnavailable(
+        "the LaTeX source could not be downloaded or processed. "
+        f"Try again later, or read the PDF: https://arxiv.org/pdf/{paper}"
+    )
 
 
 @server.set_logging_level()
@@ -143,18 +198,18 @@ async def handle_call_tool(
     try:
         if name == "get_paper_prompt":
             await mcp_log("info", f"Processing arXiv paper: {arxiv_id}")
-            prompt = process_latex_source(arxiv_id)
+            prompt = fetch_source(arxiv_id)
             result = prompt + LATEX_RENDER_INSTRUCTIONS
             await mcp_log("info", f"Successfully processed arXiv paper: {arxiv_id}")
 
         elif name == "get_paper_abstract":
             await mcp_log("info", f"Getting abstract for arXiv paper: {arxiv_id}")
-            result = process_latex_source(arxiv_id, abstract_only=True)
+            result = fetch_source(arxiv_id, abstract_only=True)
             await mcp_log("info", f"Successfully got abstract for: {arxiv_id}")
 
         elif name == "list_paper_sections":
             await mcp_log("info", f"Listing sections for arXiv paper: {arxiv_id}")
-            text = process_latex_source(arxiv_id)
+            text = fetch_source(arxiv_id)
             sections = list_sections(text)
             result = "\n".join(sections) if sections else (
                 "No \\section headings found in this paper. Read it whole with get_paper_prompt."
@@ -168,7 +223,7 @@ async def handle_call_tool(
             await mcp_log(
                 "info", f"Getting section '{section_path}' for arXiv paper: {arxiv_id}"
             )
-            text = process_latex_source(arxiv_id)
+            text = fetch_source(arxiv_id)
             result = extract_section(text, section_path)
             if result is None:
                 available = "; ".join(list_sections(text)) or "(none)"
