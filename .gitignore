@@ -1,4 +1,6 @@
 server/lib/
+server/.deps/
+bundle/
 server/__pycache__/
 __pycache__/
 *.dxt

@@ -1,48 +1,69 @@
 #!/usr/bin/env python3
+"""Bootstrap the desktop extension without reusing unverified dependencies."""
 
+import hashlib
 import importlib
-import os
+import json
+import platform
+from pathlib import Path
+import shutil
 import subprocess
 import sys
+import tempfile
 
-_server_dir = os.path.dirname(os.path.abspath(__file__))
-_bundle_root = os.path.dirname(_server_dir)
-_lib_dir = os.path.join(_server_dir, "lib")
 
-# Install dependencies into server/lib on first run so that compiled
-# extensions match the user's Python version and platform.
-# Skip if deps are already available (e.g. installed via pip/uv).
-def _needs_runtime_install():
-    if os.path.isdir(_lib_dir):
-        return False
+def prepare_dependencies(bundle_root):
+    """Install wheels once per requirements/runtime combination, then reuse them.
+
+    A private, complete installation takes precedence over global packages and
+    the legacy server/lib folder. Failed installs never become usable caches.
+    """
+    bundle_root = Path(bundle_root)
+    requirements = bundle_root / "requirements.txt"
+    runtime = json.dumps([
+        sys.implementation.name, sys.implementation.cache_tag,
+        list(sys.version_info[:3]), sys.platform, platform.machine(),
+    ]).encode()
+    fingerprint = hashlib.sha256(requirements.read_bytes() + b"\0" + runtime).hexdigest()
+    cache_root = bundle_root / "server" / ".deps"
+    target = cache_root / fingerprint
+    marker = target / ".complete"
+    if marker.is_file() and marker.read_text() == fingerprint:
+        return target
+
+    cache_root.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix="install-", dir=cache_root))
     try:
-        import mcp  # noqa: F401
-        return False
-    except ImportError:
-        return True
+        subprocess.check_call([
+            sys.executable, "-I", "-m", "pip", "install",
+            "--disable-pip-version-check", "--only-binary=:all:",
+            "--target", str(staging), "--no-user",
+            "-r", str(requirements),
+        ], stdout=sys.stderr)  # stdout is reserved for the MCP protocol.
+        (staging / ".complete").write_text(fingerprint)
+        try:
+            staging.rename(target)
+        except OSError:
+            # Another simultaneous launch may have completed the same install.
+            if not marker.is_file() or marker.read_text() != fingerprint:
+                raise
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+    return target
 
-if _needs_runtime_install():
-    subprocess.check_call(
-        [
-            sys.executable, "-m", "pip", "install",
-            "--target", _lib_dir,
-            "--no-user",
-            "-r", os.path.join(_bundle_root, "requirements.txt"),
-        ],
-        stdout=sys.stderr,  # keep stdout clean for MCP protocol
-    )
-    # Invalidate caches so Python discovers the newly-created lib dir.
+
+def run():
+    bundle_root = Path(__file__).resolve().parent.parent
+    dependencies = prepare_dependencies(bundle_root)
+    sys.path[:0] = [str(dependencies), str(bundle_root)]
     importlib.invalidate_caches()
 
-# Add bundle root (for arxiv_latex_mcp package) and lib dir to sys.path.
-for _path in [_bundle_root, _lib_dir]:
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
+    import asyncio
+    from arxiv_latex_mcp.server import main
 
-import asyncio
-
-from arxiv_latex_mcp.server import main
+    asyncio.run(main())
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    run()
