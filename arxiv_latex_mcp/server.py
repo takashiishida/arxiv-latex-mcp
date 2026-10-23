@@ -26,6 +26,7 @@ from mcp.server.stdio import stdio_server
 import mcp.types as types
 
 from arxiv_latex_mcp import __version__
+from arxiv_latex_mcp.search import SEARCH_TOOL, handle_search
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -52,6 +53,7 @@ _CACHE_MARKER = ".arxiv_cache_complete"  # written by arxiv-to-prompt when a dow
 # Sent to the client at initialization (MCP "instructions"); clients such as Claude Code show it to
 # the model at session start, so the agent knows how to use the tools before it calls them.
 SERVER_INSTRUCTIONS = """Read arXiv papers from their LaTeX source, so equations, theorems and notation are exact (better than PDF text or web-page summaries).
+- Discover papers: search_papers with a topic, author or title, optionally filtered by category and submission date. Pass a returned id to the reading tools. If the user already provides an arXiv ID, fetch it directly.
 - Whole paper: get_paper_prompt (the default; one call returns the full flattened LaTeX).
 - Long paper: list_paper_sections (top-level section titles only), then get_paper_section with section_path set to one of those titles copied verbatim, including any LaTeX. A section includes its subsections; for one subsection use "Section > Subsection" with exact titles. Numbers such as "2.1" do not work.
 - Quick preview only: get_paper_abstract.
@@ -247,6 +249,7 @@ async def handle_list_tools() -> list[types.Tool]:
                 "required": ["arxiv_id", "section_path"],
             },
         ),
+        SEARCH_TOOL,
     ]
 
 
@@ -255,6 +258,8 @@ async def handle_call_tool(
     name: str, arguments: dict[str, Any] | None
 ) -> list[types.TextContent]:
     """Handle tool calls."""
+    if name == "search_papers":
+        return await handle_search(arguments or {})
     if not arguments or "arxiv_id" not in arguments:
         raise ValueError("Missing required argument: arxiv_id")
 

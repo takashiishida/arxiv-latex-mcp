@@ -60,6 +60,21 @@ For Claude Desktop, click on the hammer icon, and you should see the following i
 - `get_paper_abstract` — Get just the abstract
 - `list_paper_sections` — List section headings of a paper
 - `get_paper_section` — Get a specific section by its title from `list_paper_sections` (`Section > Subsection` for a subsection)
+- `search_papers` — Discover papers by topic, title, or author, optionally filtered by category and submission date
+
+## Searching for papers
+
+Use `search_papers` when you do not yet have an arXiv ID. It returns paper IDs,
+titles, authors, abstracts, categories, submission dates, and PDF links. Pass a
+returned `id` to `get_paper_prompt` to read its LaTeX source. If you already have
+an ID, call the reading tools directly.
+
+For example, search with `{"query": "ti:\"neural networks\"", "categories": ["cs.LG", "stat.ML"], "date_from": "2026-01-01", "max_results": 10, "sort_by": "date"}`.
+Categories are combined with OR and restrict the query. `date_from` and `date_to`
+are inclusive submission dates in `YYYY-MM-DD` format (UTC). Searches return 10
+papers by default, up to 50, sorted by relevance or by newest submission date.
+Search requests share a three-second throttle; rate-limit errors ask you to wait
+before retrying.
 
 ## Caching
 
