@@ -5,24 +5,28 @@ This server provides tools to fetch and process arXiv papers' LaTeX source code
 for better mathematical expression interpretation.
 """
 
-import asyncio
-import json
 import logging
+import os
+import re
 import time
-import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any
 
-import arxiv
 import httpx
-from dateutil import parser as dateutil_parser
-from arxiv_to_prompt import extract_section, list_sections, process_latex_source
+from arxiv_to_prompt import (
+    extract_arxiv_id,
+    extract_section,
+    get_default_cache_dir,
+    list_sections,
+    process_latex_source,
+)
 from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 import mcp.types as types
 
 from arxiv_latex_mcp import __version__
+from arxiv_latex_mcp.search import SEARCH_TOOL, handle_search
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,33 +38,121 @@ server = Server("arxiv-latex-mcp")
 # MCP logging level (can be changed by client via logging/setLevel)
 mcp_log_level: types.LoggingLevel = "info"
 
-MAX_SEARCH_RESULTS = 50
+# Source cache. arxiv-to-prompt keeps one cache directory per paper (with a per-paper lock and atomic
+# updates). Reuse it, re-download unversioned IDs after a TTL so revised papers are picked up, and
+# fall back to the cached copy when a refresh fails.
+_CACHE_ENABLED = os.environ.get("ARXIV_LATEX_MCP_CACHE", "1") != "0"
+_CACHE_DIR = os.environ.get("ARXIV_LATEX_MCP_CACHE_DIR") or None
+try:
+    _CACHE_TTL_SECONDS = float(os.environ.get("ARXIV_LATEX_MCP_CACHE_TTL_DAYS", "7")) * 86400
+except ValueError:
+    _CACHE_TTL_SECONDS = 7 * 86400
+_VERSIONED_ID = re.compile(r"v\d+$")
+_CACHE_MARKER = ".arxiv_cache_complete"  # written by arxiv-to-prompt when a download is complete
 
-# arXiv asks for >= 3s between requests
-_last_request_time: float = 0.0
-_request_lock = asyncio.Lock()
-_MIN_REQUEST_INTERVAL = 3.0
-
-ARXIV_API_URL = "https://export.arxiv.org/api/query"
-ARXIV_NS = {
-    "atom": "http://www.w3.org/2005/Atom",
-    "arxiv": "http://arxiv.org/schemas/atom",
-}
-ARXIV_HEADERS = {
-    "User-Agent": "arxiv-latex-mcp/1.0 (https://github.com/takashiishida/arxiv-latex-mcp; research tool)"
-}
-
-VALID_CATEGORIES = {
-    "cs", "econ", "eess", "math", "physics", "q-bio", "q-fin", "stat",
-    "astro-ph", "cond-mat", "gr-qc", "hep-ex", "hep-lat", "hep-ph",
-    "hep-th", "math-ph", "nlin", "nucl-ex", "nucl-th", "quant-ph",
-}
+# Sent to the client at initialization (MCP "instructions"); clients such as Claude Code show it to
+# the model at session start, so the agent knows how to use the tools before it calls them.
+SERVER_INSTRUCTIONS = """Read arXiv papers from their LaTeX source, so equations, theorems and notation are exact (better than PDF text or web-page summaries).
+- Discover papers: search_papers with a topic, author or title, optionally filtered by category and submission date. Pass a returned id to the reading tools. If the user already provides an arXiv ID, fetch it directly.
+- Whole paper: get_paper_prompt (the default; one call returns the full flattened LaTeX).
+- Long paper: list_paper_sections (top-level section titles only), then get_paper_section with section_path set to one of those titles copied verbatim, including any LaTeX. A section includes its subsections; for one subsection use "Section > Subsection" with exact titles. Numbers such as "2.1" do not work.
+- Quick preview only: get_paper_abstract.
+- IDs: "2403.12345" is the latest version, "2403.12345v2" pins a version, and old-style IDs such as "hep-th/9711200" work.
+- An error message says why a paper failed: no LaTeX source (PDF-only paper), no abstract block, a bad ID, or arXiv unreachable. For PDF-only papers read https://arxiv.org/pdf/<id> and say that the equations came from the PDF."""
+if _CACHE_ENABLED:
+    SERVER_INSTRUCTIONS += (
+        f"\n- Sources are cached locally (unversioned IDs refresh after {_CACHE_TTL_SECONDS / 86400:g} days), "
+        "so repeated calls on the same paper are instant."
+    )
 
 LATEX_RENDER_INSTRUCTIONS = """
 
 IMPORTANT INSTRUCTIONS FOR RENDERING:
 When discussing this paper, please use dollar sign notation ($...$) for inline equations and double dollar signs ($$...$$) for display equations when providing responses that include LaTeX mathematical expressions.
 """
+
+
+class SourceUnavailable(Exception):
+    """No usable LaTeX could be produced; the message says why and what to do instead."""
+
+
+def _cache_entry(arxiv_id: str) -> Path:
+    """The paper's directory in the arxiv-to-prompt cache (named as the library names it)."""
+    base = Path(_CACHE_DIR) if _CACHE_DIR else get_default_cache_dir()
+    return base / extract_arxiv_id(arxiv_id).replace("/", "_")
+
+
+def _cache_is_fresh(arxiv_id: str) -> bool:
+    """True if a cached source may be reused: versioned IDs always, others within the TTL."""
+    if _VERSIONED_ID.search(extract_arxiv_id(arxiv_id)):
+        return True  # a specific arXiv version never changes
+    entry = _cache_entry(arxiv_id)
+    marker = entry / _CACHE_MARKER
+    try:
+        stamp = (marker if marker.exists() else entry).stat().st_mtime
+    except OSError:
+        return True  # not cached yet: the library downloads it once
+    return (time.time() - stamp) < _CACHE_TTL_SECONDS
+
+
+def _process(arxiv_id: str, **kwargs: Any) -> str | None:
+    """process_latex_source() with the cache policy above."""
+    if not _CACHE_ENABLED:
+        return process_latex_source(arxiv_id, cache_dir=_CACHE_DIR, **kwargs)
+    fresh = _cache_is_fresh(arxiv_id)
+    result = process_latex_source(arxiv_id, cache_dir=_CACHE_DIR, use_cache=fresh, **kwargs)
+    if result is None and not fresh:
+        # The refresh failed (offline, arXiv down): use the older cached copy instead.
+        result = process_latex_source(arxiv_id, cache_dir=_CACHE_DIR, use_cache=True, **kwargs)
+    return result
+
+
+def _source_problem(arxiv_id: str) -> str | None:
+    """Why arXiv cannot provide a LaTeX source, or None if its format page lists one.
+
+    This is the page arxiv-to-prompt checks before downloading.
+    """
+    paper = extract_arxiv_id(arxiv_id)
+    pdf = f"https://arxiv.org/pdf/{paper}"
+    try:
+        page = httpx.get(
+            f"https://arxiv.org/format/{paper}",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=httpx.Timeout(20.0, connect=5.0),
+            follow_redirects=True,
+        )
+    except httpx.HTTPError:
+        return f"arXiv could not be reached. Try again later, or read the PDF: {pdf}"
+    if page.status_code in (400, 404):
+        return f"'{paper}' is not a valid arXiv ID. Check the ID."
+    if not page.is_success:
+        return f"arXiv answered HTTP {page.status_code}. Try again later, or read the PDF: {pdf}"
+    if "Download source" not in page.text:
+        return f"arXiv has no LaTeX source for this paper (it was submitted as a PDF only). Read the PDF instead: {pdf}"
+    return None
+
+
+def fetch_source(arxiv_id: str, **kwargs: Any) -> str:
+    """Like process_latex_source(), but cached, and raises SourceUnavailable with the reason instead of returning None."""
+    result = _process(arxiv_id, **kwargs)
+    if result is not None:
+        return result
+    # A complete download in the cache means arXiv has the source, so skip the format-page check.
+    downloaded = _CACHE_ENABLED and (_cache_entry(arxiv_id) / _CACHE_MARKER).is_file()
+    if not downloaded:
+        problem = _source_problem(arxiv_id)
+        if problem:
+            raise SourceUnavailable(problem)
+    paper = extract_arxiv_id(arxiv_id)
+    pdf = f"https://arxiv.org/pdf/{paper}"
+    if kwargs.get("abstract_only") and _process(arxiv_id) is not None:
+        raise SourceUnavailable(
+            "the paper's LaTeX source has no abstract block. Use get_paper_prompt, get_paper_section with a "
+            f"title from list_paper_sections, or the abstract page https://arxiv.org/abs/{paper}"
+        )
+    if downloaded:
+        raise SourceUnavailable(f"its LaTeX source has no usable main .tex file. Read the PDF instead: {pdf}")
+    raise SourceUnavailable(f"the LaTeX source could not be downloaded or processed. Try again later, or read the PDF: {pdf}")
 
 
 @server.set_logging_level()
@@ -127,7 +219,7 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="list_paper_sections",
-            description="List section headings of an arXiv paper. Useful when the full paper is too long for context and you need to identify which sections to fetch individually.",
+            description="List section headings of an arXiv paper. Useful when the full paper is too long for context and you need to identify which sections to fetch individually. Returns the top-level section titles; pass one verbatim to get_paper_section.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -141,7 +233,7 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get_paper_section",
-            description="Get a specific section of an arXiv paper by section path. Use when the full paper is too long for context or the user wants to focus on a particular section. Use list_paper_sections first to find available paths.",
+            description="Get a specific section of an arXiv paper by its title. Use when the full paper is too long for context or the user wants to focus on a particular section. Use list_paper_sections first to get the titles.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -151,63 +243,13 @@ async def handle_list_tools() -> list[types.Tool]:
                     },
                     "section_path": {
                         "type": "string",
-                        "description": "The section path to extract (e.g., '1', '2.1', 'Introduction'). Use list_paper_sections to find available paths.",
+                        "description": "A section title copied verbatim from list_paper_sections (e.g., 'Introduction'), including any LaTeX in it. For a subsection use 'Section > Subsection' with exact titles. Numbers such as '2.1' are not supported.",
                     },
                 },
                 "required": ["arxiv_id", "section_path"],
             },
         ),
-        types.Tool(
-            name="search_papers",
-            annotations=types.ToolAnnotations(readOnlyHint=True, openWorldHint=True),
-            description="""Search for papers on arXiv with advanced filtering and query optimization.
-
-QUERY CONSTRUCTION GUIDELINES:
-- Use QUOTED PHRASES for exact matches: "multi-agent systems", "neural networks"
-- Combine related concepts with OR: "AI agents" OR "software agents"
-- Use field-specific searches: ti:"exact title phrase", au:"author name", abs:"keyword"
-- Use ANDNOT to exclude: "machine learning" ANDNOT "survey"
-
-CATEGORY FILTERING (recommended):
-Computer Science: cs.AI, cs.LG, cs.CL (NLP), cs.CV, cs.MA (Multi-Agent), cs.RO, cs.NE, cs.IR, cs.HC, cs.CR, cs.DB
-Statistics & Math: stat.ML, stat.AP, math.OC, math.ST
-Physics & Other: quant-ph, eess.SP, eess.AS, physics.data-an
-
-DATE FILTERING: Use YYYY-MM-DD format. Results sorted by relevance by default.
-RATE LIMITING: arXiv enforces 3s between requests (handled automatically). On rate limit errors, wait 60s before retrying.""",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": 'Search query. Use quoted phrases for exact matches (e.g., \'"machine learning" OR "deep learning"\').',
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "description": f"Maximum results to return (default: 10, max: {MAX_SEARCH_RESULTS}).",
-                    },
-                    "date_from": {
-                        "type": "string",
-                        "description": "Start date filter (YYYY-MM-DD format).",
-                    },
-                    "date_to": {
-                        "type": "string",
-                        "description": "End date filter (YYYY-MM-DD format).",
-                    },
-                    "categories": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "arXiv categories to filter by (e.g., ['cs.AI', 'cs.LG']).",
-                    },
-                    "sort_by": {
-                        "type": "string",
-                        "enum": ["relevance", "date"],
-                        "description": "Sort by 'relevance' (default) or 'date' (newest first).",
-                    },
-                },
-                "required": ["query"],
-            },
-        ),
+        SEARCH_TOOL,
     ]
 
 
@@ -216,13 +258,9 @@ async def handle_call_tool(
     name: str, arguments: dict[str, Any] | None
 ) -> list[types.TextContent]:
     """Handle tool calls."""
-    if not arguments:
-        raise ValueError("Missing arguments")
-
     if name == "search_papers":
-        return await _handle_search(arguments)
-
-    if "arxiv_id" not in arguments:
+        return await handle_search(arguments or {})
+    if not arguments or "arxiv_id" not in arguments:
         raise ValueError("Missing required argument: arxiv_id")
 
     arxiv_id = arguments["arxiv_id"]
@@ -230,20 +268,22 @@ async def handle_call_tool(
     try:
         if name == "get_paper_prompt":
             await mcp_log("info", f"Processing arXiv paper: {arxiv_id}")
-            prompt = process_latex_source(arxiv_id)
+            prompt = fetch_source(arxiv_id)
             result = prompt + LATEX_RENDER_INSTRUCTIONS
             await mcp_log("info", f"Successfully processed arXiv paper: {arxiv_id}")
 
         elif name == "get_paper_abstract":
             await mcp_log("info", f"Getting abstract for arXiv paper: {arxiv_id}")
-            result = process_latex_source(arxiv_id, abstract_only=True)
+            result = fetch_source(arxiv_id, abstract_only=True)
             await mcp_log("info", f"Successfully got abstract for: {arxiv_id}")
 
         elif name == "list_paper_sections":
             await mcp_log("info", f"Listing sections for arXiv paper: {arxiv_id}")
-            text = process_latex_source(arxiv_id)
+            text = fetch_source(arxiv_id)
             sections = list_sections(text)
-            result = "\n".join(sections)
+            result = "\n".join(sections) if sections else (
+                "No \\section headings found in this paper. Read it whole with get_paper_prompt."
+            )
             await mcp_log("info", f"Successfully listed sections for: {arxiv_id}")
 
         elif name == "get_paper_section":
@@ -253,10 +293,14 @@ async def handle_call_tool(
             await mcp_log(
                 "info", f"Getting section '{section_path}' for arXiv paper: {arxiv_id}"
             )
-            text = process_latex_source(arxiv_id)
+            text = fetch_source(arxiv_id)
             result = extract_section(text, section_path)
             if result is None:
-                result = f"Section '{section_path}' not found. Use list_paper_sections to see available sections."
+                available = "; ".join(list_sections(text)) or "(none)"
+                result = (
+                    f"Section '{section_path}' not found. Use an exact section title, not a number. "
+                    f"Top-level sections: {available}. For a subsection use 'Section > Subsection'."
+                )
             else:
                 result = result + LATEX_RENDER_INSTRUCTIONS
             await mcp_log("info", f"Successfully got section for: {arxiv_id}")
@@ -272,218 +316,6 @@ async def handle_call_tool(
         return [types.TextContent(type="text", text=error_msg)]
 
 
-def _validate_categories(categories: List[str]) -> bool:
-    for category in categories:
-        prefix = category.split(".")[0] if "." in category else category
-        if prefix not in VALID_CATEGORIES:
-            return False
-    return True
-
-
-async def _rate_limited_get(client: httpx.AsyncClient, url: str) -> httpx.Response:
-    """GET with arXiv's required 3s minimum interval between requests."""
-    global _last_request_time
-    async with _request_lock:
-        elapsed = time.monotonic() - _last_request_time
-        if elapsed < _MIN_REQUEST_INTERVAL:
-            await asyncio.sleep(_MIN_REQUEST_INTERVAL - elapsed)
-        _last_request_time = time.monotonic()
-
-    for attempt in range(2):
-        try:
-            response = await client.get(url, headers=ARXIV_HEADERS)
-            if response.status_code in (429, 503):
-                raise RuntimeError(
-                    f"arXiv is rate limiting this IP (HTTP {response.status_code}). Wait 60s before retrying."
-                )
-            response.raise_for_status()
-            return response
-        except httpx.TimeoutException:
-            if attempt == 0:
-                logger.warning("arXiv request timed out, retrying once")
-                await asyncio.sleep(5.0)
-            else:
-                raise
-    raise RuntimeError("arXiv request timed out after retry")
-
-
-def _parse_arxiv_atom(xml_text: str) -> List[Dict[str, Any]]:
-    """Parse arXiv Atom XML feed into paper dicts."""
-    results = []
-    try:
-        root = ET.fromstring(xml_text)
-    except ET.ParseError as e:
-        raise ValueError(f"Failed to parse arXiv API response: {e}")
-
-    for entry in root.findall("atom:entry", ARXIV_NS):
-        id_elem = entry.find("atom:id", ARXIV_NS)
-        if id_elem is None or not id_elem.text:
-            continue
-        paper_id = id_elem.text.split("/abs/")[-1]
-        short_id = paper_id.split("v")[0] if "v" in paper_id else paper_id
-
-        title_elem = entry.find("atom:title", ARXIV_NS)
-        title = title_elem.text.strip().replace("\n", " ") if title_elem is not None and title_elem.text else ""
-
-        authors = [
-            name_elem.text
-            for author in entry.findall("atom:author", ARXIV_NS)
-            if (name_elem := author.find("atom:name", ARXIV_NS)) is not None and name_elem.text
-        ]
-
-        summary_elem = entry.find("atom:summary", ARXIV_NS)
-        abstract = summary_elem.text.strip().replace("\n", " ") if summary_elem is not None and summary_elem.text else ""
-
-        categories: List[str] = []
-        for cat in entry.findall("arxiv:primary_category", ARXIV_NS):
-            if term := cat.get("term"):
-                categories.append(term)
-        for cat in entry.findall("atom:category", ARXIV_NS):
-            if (term := cat.get("term")) and term not in categories:
-                categories.append(term)
-
-        published_elem = entry.find("atom:published", ARXIV_NS)
-        published = published_elem.text if published_elem is not None and published_elem.text else ""
-
-        pdf_url = next(
-            (link.get("href") for link in entry.findall("atom:link", ARXIV_NS) if link.get("title") == "pdf"),
-            f"https://arxiv.org/pdf/{paper_id}",
-        )
-
-        results.append({
-            "id": short_id,
-            "title": title,
-            "authors": authors,
-            "abstract": abstract,
-            "categories": categories,
-            "published": published,
-            "url": pdf_url,
-            "resource_uri": f"arxiv://{short_id}",
-        })
-
-    return results
-
-
-async def _raw_arxiv_search(
-    query: str,
-    max_results: int,
-    sort_by: str = "relevance",
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    categories: Optional[List[str]] = None,
-) -> List[Dict[str, Any]]:
-    """Search arXiv via raw HTTP to preserve '+TO+' in date filter (arxiv package encodes it as %2B)."""
-    query_parts = []
-    if query.strip():
-        query_parts.append(f"({query})")
-    if categories:
-        query_parts.append("(" + " OR ".join(f"cat:{c}" for c in categories) + ")")
-    if date_from or date_to:
-        start = dateutil_parser.parse(date_from).strftime("%Y%m%d0000") if date_from else "199107010000"
-        end = dateutil_parser.parse(date_to).strftime("%Y%m%d2359") if date_to else datetime.now().strftime("%Y%m%d2359")
-        query_parts.append(f"submittedDate:[{start}+TO+{end}]")
-
-    if not query_parts:
-        raise ValueError("No search criteria provided")
-
-    final_query = " AND ".join(query_parts)
-    sort_map = {"relevance": "relevance", "date": "submittedDate"}
-    encoded = final_query.replace(" AND ", "+AND+").replace(" OR ", "+OR+").replace(" ", "+")
-    url = f"{ARXIV_API_URL}?search_query={encoded}&max_results={max_results}&sortBy={sort_map.get(sort_by, 'relevance')}&sortOrder=descending"
-    logger.debug(f"Raw arXiv API URL: {url}")
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await _rate_limited_get(client, url)
-    return _parse_arxiv_atom(response.text)
-
-
-async def _handle_search(arguments: Dict[str, Any]) -> list[types.TextContent]:
-    try:
-        max_results = min(int(arguments.get("max_results", 10)), MAX_SEARCH_RESULTS)
-        base_query = arguments.get("query", "").strip()
-        categories: Optional[List[str]] = arguments.get("categories")
-        date_from_arg: Optional[str] = arguments.get("date_from")
-        date_to_arg: Optional[str] = arguments.get("date_to")
-        sort_by_arg: str = arguments.get("sort_by", "relevance")
-
-        if not base_query:
-            return [types.TextContent(type="text", text="Error: No search query provided")]
-
-        if categories and not _validate_categories(categories):
-            return [types.TextContent(type="text", text="Error: Invalid category. Check arXiv category names.")]
-
-        # Use raw HTTP when date filtering is requested: the arxiv package URL-encodes
-        # '+TO+' as '%2B', which breaks the submittedDate range syntax server-side.
-        if date_from_arg or date_to_arg:
-            try:
-                results = await _raw_arxiv_search(
-                    query=base_query,
-                    max_results=max_results,
-                    sort_by=sort_by_arg,
-                    date_from=date_from_arg,
-                    date_to=date_to_arg,
-                    categories=categories,
-                )
-            except ValueError as e:
-                return [types.TextContent(type="text", text=f"Error: {e}")]
-            except httpx.HTTPStatusError as e:
-                return [types.TextContent(type="text", text=f"Error: arXiv HTTP error - {e}")]
-        else:
-            query_parts = [f"({base_query})"]
-            if categories:
-                query_parts.append("(" + " OR ".join(f"cat:{c}" for c in categories) + ")")
-            final_query = " ".join(query_parts)
-
-            sort_criterion = (
-                arxiv.SortCriterion.SubmittedDate
-                if sort_by_arg == "date"
-                else arxiv.SortCriterion.Relevance
-            )
-            search = arxiv.Search(query=final_query, max_results=max_results, sort_by=sort_criterion)
-
-            global _last_request_time
-            elapsed = time.monotonic() - _last_request_time
-            if elapsed < _MIN_REQUEST_INTERVAL:
-                await asyncio.sleep(_MIN_REQUEST_INTERVAL - elapsed)
-
-            client = arxiv.Client()
-            results = []
-            try:
-                for paper in client.results(search):
-                    if len(results) >= max_results:
-                        break
-                    results.append({
-                        "id": paper.get_short_id(),
-                        "title": paper.title,
-                        "authors": [a.name for a in paper.authors],
-                        "abstract": paper.summary,
-                        "categories": paper.categories,
-                        "published": paper.published.isoformat(),
-                        "url": paper.pdf_url,
-                        "resource_uri": f"arxiv://{paper.get_short_id()}",
-                    })
-            except arxiv.ArxivError as e:
-                if any(code in str(e) for code in ("429", "503")):
-                    raise RuntimeError("arXiv is rate limiting this IP. Wait 60s before retrying.")
-                raise
-            finally:
-                _last_request_time = time.monotonic()
-
-        logger.info(f"Search returned {len(results)} results")
-        return [types.TextContent(
-            type="text",
-            text=json.dumps({"total_results": len(results), "papers": results}, indent=2),
-        )]
-
-    except RuntimeError as e:
-        return [types.TextContent(type="text", text=f"Error: {e}")]
-    except arxiv.ArxivError as e:
-        return [types.TextContent(type="text", text=f"Error: ArXiv API error - {e}")]
-    except Exception as e:
-        logger.error(f"Search error: {e}")
-        return [types.TextContent(type="text", text=f"Error: {e}")]
-
-
 async def main() -> None:
     """Main entry point for the server."""
     async with stdio_server() as (read_stream, write_stream):
@@ -493,6 +325,7 @@ async def main() -> None:
             InitializationOptions(
                 server_name="arxiv-latex-mcp",
                 server_version=__version__,
+                instructions=SERVER_INSTRUCTIONS,
                 capabilities=server.get_capabilities(
                     notification_options=NotificationOptions(),
                     experimental_capabilities={},

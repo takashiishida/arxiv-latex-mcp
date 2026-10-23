@@ -9,14 +9,12 @@ description = "An MCP server that fetches and processes arXiv papers using LaTeX
 readme = "README.md"
 authors = [{ name = "Takashi Ishida" }]
 license = "MIT"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "LICENSE-APACHE", "THIRD_PARTY_NOTICES"]
 requires-python = ">=3.10"
 dependencies = [
     "httpx>=0.28.1",
-    "mcp[cli]>=1.6.0",
-    "arxiv-to-prompt>=0.10.0",
-    "arxiv>=2.1.0",
-    "python-dateutil>=2.9.0",
+    "mcp[cli]>=1.6.0,<2.0",
+    "arxiv-to-prompt>=0.13.1",
 ]
 
 [project.urls]
