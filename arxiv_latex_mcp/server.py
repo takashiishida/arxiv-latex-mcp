@@ -6,9 +6,20 @@ for better mathematical expression interpretation.
 """
 
 import logging
+import os
+import re
+import time
+from pathlib import Path
 from typing import Any
 
-from arxiv_to_prompt import extract_section, list_sections, process_latex_source
+import httpx
+from arxiv_to_prompt import (
+    extract_arxiv_id,
+    extract_section,
+    get_default_cache_dir,
+    list_sections,
+    process_latex_source,
+)
 from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
@@ -26,11 +37,120 @@ server = Server("arxiv-latex-mcp")
 # MCP logging level (can be changed by client via logging/setLevel)
 mcp_log_level: types.LoggingLevel = "info"
 
+# Source cache. arxiv-to-prompt keeps one cache directory per paper (with a per-paper lock and atomic
+# updates). Reuse it, re-download unversioned IDs after a TTL so revised papers are picked up, and
+# fall back to the cached copy when a refresh fails.
+_CACHE_ENABLED = os.environ.get("ARXIV_LATEX_MCP_CACHE", "1") != "0"
+_CACHE_DIR = os.environ.get("ARXIV_LATEX_MCP_CACHE_DIR") or None
+try:
+    _CACHE_TTL_SECONDS = float(os.environ.get("ARXIV_LATEX_MCP_CACHE_TTL_DAYS", "7")) * 86400
+except ValueError:
+    _CACHE_TTL_SECONDS = 7 * 86400
+_VERSIONED_ID = re.compile(r"v\d+$")
+_CACHE_MARKER = ".arxiv_cache_complete"  # written by arxiv-to-prompt when a download is complete
+
+# Sent to the client at initialization (MCP "instructions"); clients such as Claude Code show it to
+# the model at session start, so the agent knows how to use the tools before it calls them.
+SERVER_INSTRUCTIONS = """Read arXiv papers from their LaTeX source, so equations, theorems and notation are exact (better than PDF text or web-page summaries).
+- Whole paper: get_paper_prompt (the default; one call returns the full flattened LaTeX).
+- Long paper: list_paper_sections (top-level section titles only), then get_paper_section with section_path set to one of those titles copied verbatim, including any LaTeX. A section includes its subsections; for one subsection use "Section > Subsection" with exact titles. Numbers such as "2.1" do not work.
+- Quick preview only: get_paper_abstract.
+- IDs: "2403.12345" is the latest version, "2403.12345v2" pins a version, and old-style IDs such as "hep-th/9711200" work.
+- An error message says why a paper failed: no LaTeX source (PDF-only paper), no abstract block, a bad ID, or arXiv unreachable. For PDF-only papers read https://arxiv.org/pdf/<id> and say that the equations came from the PDF."""
+if _CACHE_ENABLED:
+    SERVER_INSTRUCTIONS += (
+        f"\n- Sources are cached locally (unversioned IDs refresh after {_CACHE_TTL_SECONDS / 86400:g} days), "
+        "so repeated calls on the same paper are instant."
+    )
+
 LATEX_RENDER_INSTRUCTIONS = """
 
 IMPORTANT INSTRUCTIONS FOR RENDERING:
 When discussing this paper, please use dollar sign notation ($...$) for inline equations and double dollar signs ($$...$$) for display equations when providing responses that include LaTeX mathematical expressions.
 """
+
+
+class SourceUnavailable(Exception):
+    """No usable LaTeX could be produced; the message says why and what to do instead."""
+
+
+def _cache_entry(arxiv_id: str) -> Path:
+    """The paper's directory in the arxiv-to-prompt cache (named as the library names it)."""
+    base = Path(_CACHE_DIR) if _CACHE_DIR else get_default_cache_dir()
+    return base / extract_arxiv_id(arxiv_id).replace("/", "_")
+
+
+def _cache_is_fresh(arxiv_id: str) -> bool:
+    """True if a cached source may be reused: versioned IDs always, others within the TTL."""
+    if _VERSIONED_ID.search(extract_arxiv_id(arxiv_id)):
+        return True  # a specific arXiv version never changes
+    entry = _cache_entry(arxiv_id)
+    marker = entry / _CACHE_MARKER
+    try:
+        stamp = (marker if marker.exists() else entry).stat().st_mtime
+    except OSError:
+        return True  # not cached yet: the library downloads it once
+    return (time.time() - stamp) < _CACHE_TTL_SECONDS
+
+
+def _process(arxiv_id: str, **kwargs: Any) -> str | None:
+    """process_latex_source() with the cache policy above."""
+    if not _CACHE_ENABLED:
+        return process_latex_source(arxiv_id, cache_dir=_CACHE_DIR, **kwargs)
+    fresh = _cache_is_fresh(arxiv_id)
+    result = process_latex_source(arxiv_id, cache_dir=_CACHE_DIR, use_cache=fresh, **kwargs)
+    if result is None and not fresh:
+        # The refresh failed (offline, arXiv down): use the older cached copy instead.
+        result = process_latex_source(arxiv_id, cache_dir=_CACHE_DIR, use_cache=True, **kwargs)
+    return result
+
+
+def _source_problem(arxiv_id: str) -> str | None:
+    """Why arXiv cannot provide a LaTeX source, or None if its format page lists one.
+
+    This is the page arxiv-to-prompt checks before downloading.
+    """
+    paper = extract_arxiv_id(arxiv_id)
+    pdf = f"https://arxiv.org/pdf/{paper}"
+    try:
+        page = httpx.get(
+            f"https://arxiv.org/format/{paper}",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=httpx.Timeout(20.0, connect=5.0),
+            follow_redirects=True,
+        )
+    except httpx.HTTPError:
+        return f"arXiv could not be reached. Try again later, or read the PDF: {pdf}"
+    if page.status_code in (400, 404):
+        return f"'{paper}' is not a valid arXiv ID. Check the ID."
+    if not page.is_success:
+        return f"arXiv answered HTTP {page.status_code}. Try again later, or read the PDF: {pdf}"
+    if "Download source" not in page.text:
+        return f"arXiv has no LaTeX source for this paper (it was submitted as a PDF only). Read the PDF instead: {pdf}"
+    return None
+
+
+def fetch_source(arxiv_id: str, **kwargs: Any) -> str:
+    """Like process_latex_source(), but cached, and raises SourceUnavailable with the reason instead of returning None."""
+    result = _process(arxiv_id, **kwargs)
+    if result is not None:
+        return result
+    # A complete download in the cache means arXiv has the source, so skip the format-page check.
+    downloaded = _CACHE_ENABLED and (_cache_entry(arxiv_id) / _CACHE_MARKER).is_file()
+    if not downloaded:
+        problem = _source_problem(arxiv_id)
+        if problem:
+            raise SourceUnavailable(problem)
+    paper = extract_arxiv_id(arxiv_id)
+    pdf = f"https://arxiv.org/pdf/{paper}"
+    if kwargs.get("abstract_only") and _process(arxiv_id) is not None:
+        raise SourceUnavailable(
+            "the paper's LaTeX source has no abstract block. Use get_paper_prompt, get_paper_section with a "
+            f"title from list_paper_sections, or the abstract page https://arxiv.org/abs/{paper}"
+        )
+    if downloaded:
+        raise SourceUnavailable(f"its LaTeX source has no usable main .tex file. Read the PDF instead: {pdf}")
+    raise SourceUnavailable(f"the LaTeX source could not be downloaded or processed. Try again later, or read the PDF: {pdf}")
 
 
 @server.set_logging_level()
@@ -97,7 +217,7 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="list_paper_sections",
-            description="List section headings of an arXiv paper. Useful when the full paper is too long for context and you need to identify which sections to fetch individually.",
+            description="List section headings of an arXiv paper. Useful when the full paper is too long for context and you need to identify which sections to fetch individually. Returns the top-level section titles; pass one verbatim to get_paper_section.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -111,7 +231,7 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get_paper_section",
-            description="Get a specific section of an arXiv paper by section path. Use when the full paper is too long for context or the user wants to focus on a particular section. Use list_paper_sections first to find available paths.",
+            description="Get a specific section of an arXiv paper by its title. Use when the full paper is too long for context or the user wants to focus on a particular section. Use list_paper_sections first to get the titles.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -121,7 +241,7 @@ async def handle_list_tools() -> list[types.Tool]:
                     },
                     "section_path": {
                         "type": "string",
-                        "description": "The section path to extract (e.g., '1', '2.1', 'Introduction'). Use list_paper_sections to find available paths.",
+                        "description": "A section title copied verbatim from list_paper_sections (e.g., 'Introduction'), including any LaTeX in it. For a subsection use 'Section > Subsection' with exact titles. Numbers such as '2.1' are not supported.",
                     },
                 },
                 "required": ["arxiv_id", "section_path"],
@@ -143,20 +263,22 @@ async def handle_call_tool(
     try:
         if name == "get_paper_prompt":
             await mcp_log("info", f"Processing arXiv paper: {arxiv_id}")
-            prompt = process_latex_source(arxiv_id)
+            prompt = fetch_source(arxiv_id)
             result = prompt + LATEX_RENDER_INSTRUCTIONS
             await mcp_log("info", f"Successfully processed arXiv paper: {arxiv_id}")
 
         elif name == "get_paper_abstract":
             await mcp_log("info", f"Getting abstract for arXiv paper: {arxiv_id}")
-            result = process_latex_source(arxiv_id, abstract_only=True)
+            result = fetch_source(arxiv_id, abstract_only=True)
             await mcp_log("info", f"Successfully got abstract for: {arxiv_id}")
 
         elif name == "list_paper_sections":
             await mcp_log("info", f"Listing sections for arXiv paper: {arxiv_id}")
-            text = process_latex_source(arxiv_id)
+            text = fetch_source(arxiv_id)
             sections = list_sections(text)
-            result = "\n".join(sections)
+            result = "\n".join(sections) if sections else (
+                "No \\section headings found in this paper. Read it whole with get_paper_prompt."
+            )
             await mcp_log("info", f"Successfully listed sections for: {arxiv_id}")
 
         elif name == "get_paper_section":
@@ -166,10 +288,14 @@ async def handle_call_tool(
             await mcp_log(
                 "info", f"Getting section '{section_path}' for arXiv paper: {arxiv_id}"
             )
-            text = process_latex_source(arxiv_id)
+            text = fetch_source(arxiv_id)
             result = extract_section(text, section_path)
             if result is None:
-                result = f"Section '{section_path}' not found. Use list_paper_sections to see available sections."
+                available = "; ".join(list_sections(text)) or "(none)"
+                result = (
+                    f"Section '{section_path}' not found. Use an exact section title, not a number. "
+                    f"Top-level sections: {available}. For a subsection use 'Section > Subsection'."
+                )
             else:
                 result = result + LATEX_RENDER_INSTRUCTIONS
             await mcp_log("info", f"Successfully got section for: {arxiv_id}")
@@ -194,6 +320,7 @@ async def main() -> None:
             InitializationOptions(
                 server_name="arxiv-latex-mcp",
                 server_version=__version__,
+                instructions=SERVER_INSTRUCTIONS,
                 capabilities=server.get_capabilities(
                     notification_options=NotificationOptions(),
                     experimental_capabilities={},

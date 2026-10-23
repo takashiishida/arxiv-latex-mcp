@@ -52,23 +52,23 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arxiv-to-prompt", specifier = ">=0.10.0" },
+    { name = "arxiv-to-prompt", specifier = ">=0.13.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.6.0,<2.0" },
 ]
 
 [[package]]
 name = "arxiv-to-prompt"
-version = "0.10.0"
+version = "0.14.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
     { name = "pyperclip" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/21/2d/9927ef07075c4d11a130551ebf4d008173966d12705648867742b0767efc/arxiv_to_prompt-0.10.0.tar.gz", hash = "sha256:17a612386dfd8b723784452ff751d7782f5fda9ff79bf0a2faf9eaa6790ae61d", size = 23800, upload-time = "2026-02-15T02:21:51.35Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/10/9f/1991ce9dd93ec66b6ddbeb6ef76e7d7c693ef7116b996d41f1f026724b09/arxiv_to_prompt-0.14.1.tar.gz", hash = "sha256:6a87125045210c9b6b6c3062202809d470f86196cb813ff51a1575ee92e320a9", size = 32992, upload-time = "2026-08-24T12:34:18.001Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/66/a0/0576a17e1baf903a1998a4f854cc17739db12332d871d123c478d40cc6c9/arxiv_to_prompt-0.10.0-py3-none-any.whl", hash = "sha256:b7cb77901d857edd1c5424c77a0065cfd1bebad9e393f9dc5ec60af17c0101c1", size = 14837, upload-time = "2026-02-15T02:21:49.792Z" },
+    { url = "https://files.pythonhosted.org/packages/13/c2/a388ee799226b05ebe9e85fc1150cab6233ccf885e3926bc8c6700008b99/arxiv_to_prompt-0.14.1-py3-none-any.whl", hash = "sha256:f8982622bfc517dac3198febc6fffcb78d8708c98c1630c224066a2b07171d2a", size = 19222, upload-time = "2026-08-24T12:34:16.66Z" },
 ]
 
 [[package]]
@@ -343,7 +343,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
