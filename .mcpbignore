@@ -8,6 +8,11 @@ __pycache__/
 .claude/
 .git/
 server/lib/
+server/.deps/
+bundle/
+tests/
+scripts/
+docs/
 uv.lock
 example.png
 log.txt

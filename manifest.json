@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.3",
   "name": "arxiv-latex-mcp",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "MCP server that uses arxiv-to-prompt to fetch and process arXiv LaTeX sources for precise interpretation of mathematical expressions in scientific papers.",
   "author": {
     "name": "Takashi Ishida",
@@ -16,10 +16,7 @@
       "command": "python3",
       "args": [
         "${__dirname}/server/main.py"
-      ],
-      "env": {
-        "PYTHONPATH": "${__dirname}:${__dirname}/server/lib"
-      }
+      ]
     }
   },
   "license": "MIT",

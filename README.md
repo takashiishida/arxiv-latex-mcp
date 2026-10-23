@@ -13,6 +13,7 @@ Why use the LaTeX source instead of uploading PDFs? Many PDF chat applications o
 
 If you are using Claude Desktop, you can utilize Desktop Extensions by double-clicking on the `.mcpb` file to install.
 Download the `.mcpb` file from [here](https://github.com/takashiishida/arxiv-latex-mcp/releases/).
+The extension needs Python 3.10+ with pip. On first launch, and whenever its dependency requirements or Python runtime change, it downloads wheels into a private cache inside the extension. This requires internet access; subsequent launches reuse that cache. Restart your MCP client after installing an updated extension.
 Supported on macOS, Windows, and Linux.
 
 Otherwise, you can run the server directly from PyPI with `uvx`:

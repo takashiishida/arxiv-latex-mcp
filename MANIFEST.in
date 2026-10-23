@@ -1,0 +1,4 @@
+include manifest.json requirements.txt uv.lock
+include server/main.py
+recursive-include scripts *.py
+recursive-include docs/releases *.md
