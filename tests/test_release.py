@@ -3,15 +3,13 @@
 import json
 from pathlib import Path
 import shutil
-import sys
 import tempfile
 import unittest
 import zipfile
 
 from scripts.build_bundle import build_bundle
 
-if sys.version_info >= (3, 11):
-    from scripts.check_release import check_release
+from scripts.check_release import check_release
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,7 +33,6 @@ class BundleTests(unittest.TestCase):
                 self.assertNotIn("PYTHONPATH", manifest["server"]["mcp_config"].get("env", {}))
 
 
-@unittest.skipIf(sys.version_info < (3, 11), "Release tooling uses Python 3.11+; runtime supports 3.10")
 class ReleaseMetadataTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()

@@ -4,21 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "arxiv-latex-mcp"
-version = "0.3.0"
+version = "0.4.0"
 description = "An MCP server that fetches and processes arXiv papers using LaTeX source for accurate equation handling"
 readme = "README.md"
 authors = [{ name = "Takashi Ishida" }]
 license = "MIT"
 license-files = ["LICENSE", "LICENSE-APACHE", "THIRD_PARTY_NOTICES"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.28.1",
     "mcp[cli]>=1.30.0,<2.0",
     "arxiv-to-prompt>=0.13.1",
-    # Security floors for transitive authentication and HTTP dependencies.
+    # Security floors for transitive dependencies.
     "certifi>=2026.10.19",
     "PyJWT>=2.15.1",
     "urllib3>=2.8.0",
+    "filelock>=4.2.1",
 ]
 
 [project.urls]
